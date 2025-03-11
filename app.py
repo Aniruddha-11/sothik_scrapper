@@ -1,9 +1,14 @@
 from flask import Flask
 from file_api import file_api
 import os
-
+from flask_cors import CORS
 # Create the main Flask app
 app = Flask(__name__)
+
+CORS(app, resources={
+    r"/realtime-stats/*": {"origins": "*"},
+    r"/scrapped-sub-links": {"origins": "*"}
+})
 
 # Register blueprints
 app.register_blueprint(file_api)

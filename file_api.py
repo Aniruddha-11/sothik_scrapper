@@ -13,6 +13,7 @@ import random
 import traceback
 from bson.objectid import ObjectId
 
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -689,47 +690,191 @@ def scrape_single_link(db, link_doc):
             'traceback': tb
         }
 
-@file_api.route('/realtime-stats', methods=['GET'])
-def realtime_stats():
-    """Get real-time statistics for the frontend"""
+@file_api.route('/realtime-stats/links-to-scrap', methods=['GET'])
+def get_links_to_scrap():
+    """Get all links in the Links_to_scrap collection"""
     client = None
     try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        links_to_scrap_collection = db[LINKS_COLLECTION]
+        links_to_scrap = list(links_to_scrap_collection.find({}, {'link': 1, '_id': 0}))
+        all_links = [link['link'] for link in links_to_scrap]
+        return jsonify({
+            'status': 'success',
+            'links': all_links,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc(),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        if client:
+            client.close()
+
+@file_api.route('/realtime-stats/total-processed-links', methods=['GET'])
+def get_total_processed_links():
+    """Get the total number of links in the Processed_Links collection"""
+    client = None
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        processed_links_collection = db[PROCESSED_COLLECTION]
+        total_number_of_links = processed_links_collection.count_documents({})
+        return jsonify({
+            'status': 'success',
+            'total_processed_links': total_number_of_links,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc(),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        if client:
+            client.close()
+
+@file_api.route('/realtime-stats/scrapped-links', methods=['GET'])
+def get_scrapped_links():
+    """Get the number of links in the scrapped_text collection"""
+    client = None
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        scrapped_text_collection = db[CONTENT_COLLECTION]
+        scrapped_links_count = scrapped_text_collection.count_documents({})
+        return jsonify({
+            'status': 'success',
+            'scrapped_links': scrapped_links_count,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc(),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        if client:
+            client.close()
+
+@file_api.route('/realtime-stats/pending-links', methods=['GET'])
+def get_pending_links():
+    """Get the number of pending links in the Processed_Links collection"""
+    client = None
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        processed_links_collection = db[PROCESSED_COLLECTION]
+        pending_links = processed_links_collection.count_documents({'is_processed': False})
+        return jsonify({
+            'status': 'success',
+            'pending_links': pending_links,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc(),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        if client:
+            client.close()
+
+@file_api.route('/realtime-stats/total-words-scrapped', methods=['GET'])
+def get_total_words_scrapped():
+    """Get the total number of words scraped from all links using MongoDB aggregation"""
+    client = None
+    try:
+        client = get_mongo_client()
+        db = client[DB_NAME]
+        scrapped_text_collection = db[CONTENT_COLLECTION]
+
+        # Use MongoDB aggregation to calculate total words
+        pipeline = [
+            {
+                "$project": {
+                    "word_count": { "$size": { "$split": ["$scrapped_content", " "] } }
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "total_words": { "$sum": "$word_count" }
+                }
+            }
+        ]
+
+        result = list(scrapped_text_collection.aggregate(pipeline))
+        total_words_scrapped = result[0]['total_words'] if result else 0
+
+        return jsonify({
+            'status': 'success',
+            'total_words_scrapped': total_words_scrapped,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc(),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        if client:
+            client.close()
+
+@file_api.route('/scrapped-sub-links', methods=['POST'])
+def scrapped_sub_links():
+    """Fetch the content of a specific URL from the scrapped_text collection"""
+    client = None
+    try:
+        # Get the URL from the request body
+        data = request.get_json()
+        if not data or 'url' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'URL is required in the request body.',
+                'timestamp': datetime.now().isoformat()
+            }), 400
+
+        url = data['url']
+
         # Get MongoDB client
         client = get_mongo_client()
         db = client[DB_NAME]
 
-        # Get collections
-        links_to_scrap_collection = db[LINKS_COLLECTION]
-        processed_links_collection = db[PROCESSED_COLLECTION]
+        # Get the scrapped_text collection
         scrapped_text_collection = db[CONTENT_COLLECTION]
 
-        # Fetch all links in Links_to_scrap collection
-        links_to_scrap = list(links_to_scrap_collection.find({}, {'link': 1, '_id': 0}))
-        all_links = [link['link'] for link in links_to_scrap]
+        # Find the document with the specified URL
+        document = scrapped_text_collection.find_one(
+            {'content_link': url},  # Query to find the specific URL
+            {'scrapped_content': 1, '_id': 0}  # Projection (include only scrapped_content)
+        )
 
-        # Fetch total number of links in Processed_Links collection
-        total_number_of_links = processed_links_collection.count_documents({})
-
-        # Fetch number of scrapped links (number of links in scrapped_text collection)
-        scrapped_links_count = scrapped_text_collection.count_documents({})
-
-        # Fetch pending links (links in Processed_Links collection that are not yet processed)
-        pending_links = processed_links_collection.count_documents({'is_processed': False})
-
-        # Calculate total words scrapped
-        total_words_scrapped = 0
-        scrapped_documents = scrapped_text_collection.find({}, {'scrapped_content': 1, '_id': 0})
-        for doc in scrapped_documents:
-            if 'scrapped_content' in doc:
-                total_words_scrapped += len(doc['scrapped_content'].split())
+        if not document:
+            return jsonify({
+                'status': 'error',
+                'message': f'No content found for the URL: {url}',
+                'timestamp': datetime.now().isoformat()
+            }), 404
 
         # Prepare response
         response = {
-            'Links': all_links,
-            'Total_Number_of_Links': total_number_of_links,
-            'Scrapped_Links': scrapped_links_count,  # Number of links in scrapped_text collection
-            'Pending_Links': pending_links,
-            'Total_Words_Scrapped': total_words_scrapped
+            'url': url,
+            'content': document['scrapped_content']
         }
 
         return jsonify({
@@ -748,43 +893,3 @@ def realtime_stats():
     finally:
         if client:
             client.close()
-
-# @file_api.route('/scrapped-sub-links', methods=['GET'])
-# def scrapped_sub_links():
-#     """Get all scrapped sub-links with their content from the scrapped_text collection"""
-#     client = None
-#     try:
-#         # Get MongoDB client
-#         client = get_mongo_client()
-#         db = client[DB_NAME]
-
-#         # Get the scrapped_text collection
-#         scrapped_text_collection = db[CONTENT_COLLECTION]
-
-#         # Fetch all documents from the scrapped_text collection, projecting only content_link and scrapped_content
-#         scrapped_sub_links = list(scrapped_text_collection.find(
-#             {},  # Query (empty to fetch all documents)
-#             {'content_link': 1, 'scrapped_content': 1, '_id': 0}  # Projection (include only these fields)
-#         ))
-
-#         # Prepare response
-#         response = {
-#             'scrapped_sub_links': scrapped_sub_links
-#         }
-
-#         return jsonify({
-#             'status': 'success',
-#             'data': response,
-#             'timestamp': datetime.now().isoformat()
-#         })
-
-#     except Exception as e:
-#         return jsonify({
-#             'status': 'error',
-#             'message': str(e),
-#             'traceback': traceback.format_exc(),
-#             'timestamp': datetime.now().isoformat()
-#         }), 500
-#     finally:
-#         if client:
-#             client.close()
