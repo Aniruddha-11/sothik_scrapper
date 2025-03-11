@@ -5,6 +5,11 @@ from flask_cors import CORS
 # Create the main Flask app
 app = Flask(__name__)
 
+
+@app.route('/')
+def home():
+    return "Backend is working!", 200
+
 CORS(app, resources={
     r"/realtime-stats/*": {"origins": "*"},
     r"/scrapped-sub-links": {"origins": "*"}
